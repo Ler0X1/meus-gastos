@@ -12,6 +12,12 @@
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>Meus Gastos</title>
+<meta name="description" content="Controle seus gastos de forma rápida, direto no celular. Funciona offline e seus dados ficam só no seu aparelho.">
+<meta property="og:title" content="Meus Gastos — controle de despesas">
+<meta property="og:description" content="Rápido, fácil e funciona sem internet. Seus dados ficam só no seu celular.">
+<meta property="og:image" content="https://ler0x1.github.io/meus-gastos/icon-512.png">
+<meta property="og:url" content="https://ler0x1.github.io/meus-gastos/">
+<meta property="og:type" content="website">
 <style>
 :root{
   color-scheme:light;
@@ -53,7 +59,13 @@ input,select,textarea{font:inherit;color:var(--text)}
 /* topo */
 .top{position:sticky;top:0;z-index:20;background:var(--bg);padding:10px 0 8px}
 .top .wrap{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.title{font-size:22px;font-weight:700;letter-spacing:-.01em}
+.title{font-size:22px;font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.welcome{position:fixed;inset:0;z-index:80;background:var(--bg);overflow-y:auto;padding:calc(28px + var(--safe-t)) 0 calc(24px + var(--safe-b))}
+.welcome .wrap{max-width:440px;display:flex;flex-direction:column;min-height:100%}
+.welcome img{width:84px;height:84px;border-radius:22px;box-shadow:0 8px 24px rgba(42,120,214,.3)}
+.welcome h1{font-size:28px;letter-spacing:-.02em;margin:18px 0 6px}
+.welcome .feat{display:flex;gap:12px;align-items:flex-start;margin:12px 0;font-size:15px}
+.welcome .feat .ico{width:36px;height:36px;font-size:18px;border-radius:10px}
 .month{display:flex;align-items:center;gap:2px;background:var(--card);border:1px solid var(--border);border-radius:999px;padding:3px}
 .month button{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:18px;color:var(--text2)}
 .month button:active{background:var(--card2)}
@@ -200,6 +212,13 @@ textarea.inp{height:auto;min-height:150px;padding:12px 14px;resize:vertical;line
 #toastActs{display:flex;gap:2px;flex:none}
 .toast button{color:var(--accent-2);font-weight:700;font-size:14px;padding:4px 6px}
 :root[data-theme="dark"] .toast button{color:#2a78d6}
+.badge{display:inline-flex;align-items:center;gap:3px;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap;margin-top:3px}
+.badge.topay{background:var(--accent-soft);color:var(--accent)}
+.badge.paid{background:#e2f4e2;color:var(--good-ink)}
+:root[data-theme="dark"] .badge.paid{background:#13301a}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])) .badge.paid{background:#13301a}}
+button.badge{font-size:12px;padding:6px 11px;border:1px solid transparent}
+.alertline{background:var(--accent-soft);color:var(--text);border-radius:12px;padding:9px 12px;font-size:13.5px;margin-bottom:8px}
 .banner{background:#fff4d6;color:#5a4300;border:1px solid #f2d27a;border-radius:14px;padding:10px 12px;font-size:13px;margin-top:10px}
 :root[data-theme="dark"] .banner{background:#3a2f12;color:#f4dc9a;border-color:#5f4c17}
 </style>
@@ -235,6 +254,7 @@ textarea.inp{height:auto;min-height:150px;padding:12px 14px;resize:vertical;line
   </div>
 </nav>
 
+<div class="welcome hidden" id="welcome"></div>
 <div class="overlay" id="overlay"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="wrap" id="sheetBody"></div></div>
 <div class="toast" id="toast"><span id="toastMsg"></span><span id="toastActs"></span></div>
@@ -256,6 +276,7 @@ const DEFAULT_CATS = [
   {id:"assin",  name:"Assinaturas", emoji:"📺"},
   {id:"pessoal",name:"Cuidados",    emoji:"💇"},
   {id:"pets",   name:"Pets",        emoji:"🐾"},
+  {id:"fixos",  name:"Gastos fixos",emoji:"📌"},
   {id:"outros", name:"Outros",      emoji:"📦"}
 ];
 const KEYWORDS = {
@@ -276,8 +297,8 @@ const METHODS = [["pix","Pix"],["debito","Débito"],["credito","Crédito"],["din
 
 let storageOk = true;
 function freshState(){
-  return {expenses:[], cats:JSON.parse(JSON.stringify(DEFAULT_CATS)), memory:{},
-          settings:{budget:0, salary:0, theme:"auto", lastMethod:"pix", lastBackup:0}};
+  return {expenses:[], fixed:[], fixedSkip:{}, cats:JSON.parse(JSON.stringify(DEFAULT_CATS)), memory:{},
+          settings:{name:"", budget:0, salary:0, theme:"auto", lastMethod:"pix", lastBackup:0}};
 }
 function load(){
   let s = null;
@@ -288,6 +309,9 @@ function load(){
   s.expenses = Array.isArray(s.expenses) ? s.expenses : [];
   s.cats = Array.isArray(s.cats) && s.cats.length ? s.cats : base.cats;
   s.memory = s.memory || {};
+  s.fixed = Array.isArray(s.fixed) ? s.fixed : [];
+  s.fixedSkip = s.fixedSkip || {};
+  if (!s.cats.some(c=>c.id==="fixos")){ const i = s.cats.findIndex(c=>c.id==="outros"); s.cats.splice(i<0?s.cats.length:i, 0, {id:"fixos",name:"Gastos fixos",emoji:"📌"}); }
   s.settings = Object.assign(base.settings, s.settings || {});
   return s;
 }
@@ -407,6 +431,40 @@ function suggestions(text, limit){
   return list.slice(0,limit);
 }
 
+/* ================= Gastos fixos ================= */
+function dueDate(mk, day){ return mk+"-"+pad(Math.min(day, daysInMonth(mk))); }
+function ensureFixed(){
+  const cur = monthKey(today()); let changed = false;
+  state.fixed.forEach(f=>{
+    let mk = f.start, guard = 0;
+    while (mk <= cur && guard++ < 240){
+      if (!state.fixedSkip[f.id+"|"+mk] && !state.expenses.some(e=>e.fx===f.id && monthKey(e.dt)===mk)){
+        state.expenses.push({id:uid(), v:f.v, d:f.d, c:f.c, dt:dueDate(mk,f.day), m:f.m||"", ts:Date.now(), fx:f.id});
+        changed = true;
+      }
+      mk = shiftMonth(mk,1);
+    }
+  });
+  if (changed) save();
+}
+const isPaid = e => e.paid!==undefined && e.paid!==null ? !!e.paid : today() >= e.dt;
+const daysTo = dt => Math.round((parseYmd(dt) - parseYmd(today()))/864e5);
+function fixLabel(e){
+  if (isPaid(e)) return "✓ Pago";
+  const n = daysTo(e.dt);
+  return n<0 ? "⏰ Vencida · a pagar" : n===0 ? "⏰ Vence hoje" : n===1 ? "⏰ Vence amanhã" : "⏰ A pagar · dia "+parseYmd(e.dt).getDate();
+}
+function fixBadge(e, asButton){
+  if (!e.fx) return "";
+  const cls = isPaid(e) ? "paid" : "topay";
+  return asButton ? `<button class="badge ${cls}" data-paid="${e.id}">${fixLabel(e)}</button>` : `<span class="badge ${cls}">${fixLabel(e)}</span>`;
+}
+function togglePaid(id){
+  const e = state.expenses.find(x=>x.id===id); if (!e) return;
+  e.paid = !isPaid(e); save(); render();
+  toast(e.paid ? `✓ ${esc(e.d)} marcado como pago` : `${esc(e.d)} voltou para a pagar`);
+}
+
 /* ================= Operações ================= */
 function addExpense(e, silent){
   const exp = {id:uid(), v:e.v, d:(e.d||"").trim() || catById(e.c).name, c:e.c||"outros", dt:e.dt||today(), m:e.m||"", ts:Date.now()};
@@ -447,7 +505,8 @@ function setTab(t){
   document.querySelectorAll(".nav .tab").forEach(b=>b.classList.toggle("on", b.dataset.tab===t));
   ["inicio","gastos","relatorios","ajustes"].forEach(v=>$("#v-"+v).classList.toggle("hidden", v!==t));
   $("#monthNav").classList.toggle("hidden", t==="ajustes");
-  $("#pageTitle").textContent = {inicio:"Meus Gastos",gastos:"Gastos",relatorios:"Relatórios",ajustes:"Ajustes"}[t];
+  const nm = (state.settings.name||"").trim().split(/\s+/)[0];
+  $("#pageTitle").textContent = {inicio: nm ? "Olá, "+nm+" 👋" : "Meus Gastos",gastos:"Gastos",relatorios:"Relatórios",ajustes:"Ajustes"}[t];
   render(); window.scrollTo(0,0);
 }
 function render(){
@@ -459,8 +518,8 @@ function render(){
 }
 function itemHTML(e, showDate){
   const c = catById(e.c);
-  const sub = [c.name, e.m?methodName(e.m):"", showDate?dayLabel(e.dt):""].filter(Boolean).join(" · ");
-  return `<button class="item" data-edit="${e.id}"><div class="ico">${c.emoji}</div><div class="mid"><div class="d">${esc(e.d)}</div><div class="s">${esc(sub)}</div></div><div class="v">${money(e.v)}</div></button>`;
+  const sub = [e.fx && e.c!=="fixos"?"📌 Fixo":"", c.name, e.m?methodName(e.m):"", showDate?dayLabel(e.dt):""].filter(Boolean).join(" · ");
+  return `<button class="item" data-edit="${e.id}"><div class="ico">${c.emoji}</div><div class="mid"><div class="d">${esc(e.d)}</div><div class="s">${esc(sub)}</div></div><div style="text-align:right"><div class="v">${money(e.v)}</div>${fixBadge(e,false)}</div></button>`;
 }
 function catTotals(list){
   const m = {}; list.forEach(e=>{ m[e.c]=(m[e.c]||0)+e.v; });
@@ -495,6 +554,18 @@ function renderHome(){
     bud = `<div class="hint" style="margin-top:10px"><span>Defina um limite mensal para acompanhar.</span><button data-act="budget">Definir orçamento</button></div>`;
   }
   const recents = suggestions("",8);
+  const fixList = list.filter(e=>e.fx).sort((a,b)=>a.dt.localeCompare(b.dt));
+  let fixCard = "";
+  if (!state.fixed.length){
+    fixCard = `<div class="card" style="display:flex;align-items:center;gap:12px"><div class="ico">📌</div><div style="flex:1;font-size:14px"><b>Gastos fixos</b><br><span class="t2">Aluguel, internet, faculdade… cadastre uma vez e eles entram sozinhos todo mês.</span></div><button class="btn sec" data-act="fixed" style="width:auto;height:40px;padding:0 14px;font-size:14px">Cadastrar</button></div>`;
+  } else if (fixList.length){
+    const toPay = fixList.filter(e=>!isPaid(e)), soon = isCur ? toPay.filter(e=>daysTo(e.dt)<=3) : [];
+    fixCard = `<div class="card"><h3>Gastos fixos <button class="link" data-act="fixed">Gerenciar</button></h3>
+      ${soon.length?`<div class="alertline">⏰ <b>${soon.length===1?"1 conta vence":soon.length+" contas vencem"} em breve:</b> ${soon.map(e=>esc(e.d)+" ("+(daysTo(e.dt)<0?"vencida":daysTo(e.dt)===0?"hoje":daysTo(e.dt)===1?"amanhã":"dia "+parseYmd(e.dt).getDate())+")").join(", ")}</div>`:""}
+      <div class="sumline" style="margin:0 2px 4px"><span>A pagar <b>${money(sum(toPay))}</b></span><span>Pago <b>${money(sum(fixList)-sum(toPay))}</b></span></div>
+      ${fixList.map(e=>`<div class="item" data-edit="${e.id}" style="cursor:pointer"><div class="ico">${catById(e.c).emoji}</div><div class="mid"><div class="d">${esc(e.d)}</div><div class="s">${money(e.v)} · dia ${parseYmd(e.dt).getDate()}</div></div>${fixBadge(e,true)}</div>`).join("")}
+      <div class="muted" style="font-size:12px;margin-top:6px">Toque no selo para marcar como pago ou a pagar.</div></div>`;
+  }
   const last = list.slice().sort(byDateDesc).slice(0,5);
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
   $("#v-inicio").innerHTML = (deferredInstall && !standalone ? `<div class="card" style="display:flex;align-items:center;gap:12px;background:var(--accent-soft)"><div class="ico">📲</div><div style="flex:1;font-size:14px"><b>Instale o app no celular</b><br><span class="t2">Abre pelo ícone e funciona sem internet.</span></div><button class="btn pri" data-act="install" style="width:auto;height:42px;padding:0 16px;font-size:15px">Instalar</button></div>` : "") + `
@@ -512,6 +583,7 @@ function renderHome(){
       <div class="hint"><span>Digite a descrição e o valor e pronto.</span><button data-act="paste">Colar vários</button></div>
       ${recents.length?`<div style="margin-top:12px" class="chips">${recents.map(r=>`<button class="chip" data-rep="${esc(r.key)}">${catById(r.c).emoji} ${esc(r.d)} <small>${money(r.v)}</small></button>`).join("")}</div>`:""}
     </div>
+    ${fixCard}
     ${list.length?`
     <div class="card"><h3>Onde foi o dinheiro <button class="link" data-act="reports">Ver tudo</button></h3>${catBarsHTML(list,4)}</div>
     <div class="card"><h3>Últimos gastos <button class="link" data-act="list">Ver todos</button></h3>${last.map(e=>itemHTML(e,true)).join("")}</div>`
@@ -644,8 +716,10 @@ function renderSettings(){
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
   $("#v-ajustes").innerHTML = `
     <div class="card">
+      <button class="set" data-act="name"><div class="ico">👤</div><div class="mid"><div class="d">Seu nome</div><div class="s">${esc(s.name||"Não informado")}</div></div><div class="chev">›</div></button>
       <button class="set" data-act="budget"><div class="ico">🎯</div><div class="mid"><div class="d">Orçamento mensal</div><div class="s">${s.budget?money(s.budget):"Não definido"}</div></div><div class="chev">›</div></button>
       <button class="set" data-act="salary"><div class="ico">💰</div><div class="mid"><div class="d">Salário (valor por dia)</div><div class="s">${s.salary?money(s.salary)+" → "+money(Math.round(s.salary/30))+"/dia":"Não informado"}</div></div><div class="chev">›</div></button>
+      <button class="set" data-act="fixed"><div class="ico">📌</div><div class="mid"><div class="d">Gastos fixos</div><div class="s">${state.fixed.length?state.fixed.length+" cadastrados · "+money(sum(state.fixed))+"/mês":"Entram sozinhos todo mês"}</div></div><div class="chev">›</div></button>
       <button class="set" data-act="cats"><div class="ico">🏷️</div><div class="mid"><div class="d">Categorias</div><div class="s">${state.cats.filter(c=>!c.hidden).length} ativas · editar, criar, ocultar</div></div><div class="chev">›</div></button>
       <button class="set" data-act="memory"><div class="ico">🧠</div><div class="mid"><div class="d">Memória do app</div><div class="s">${memN} descrições aprendidas</div></div><div class="chev">›</div></button>
       <button class="set" data-act="paste"><div class="ico">📋</div><div class="mid"><div class="d">Colar vários gastos</div><div class="s">Cole uma lista e importe de uma vez</div></div><div class="chev">›</div></button>
@@ -668,7 +742,12 @@ function renderSettings(){
       `${deferredInstall?`<button class="btn pri" data-act="install" style="margin-bottom:12px">Instalar na tela inicial</button>`:""}
       <div class="t2" style="font-size:14px;line-height:1.5"><b>Android (Chrome):</b> menu ⋮ → <i>Instalar app</i> ou <i>Adicionar à tela inicial</i>.<br><b>iPhone (Safari):</b> botão Compartilhar → <i>Adicionar à Tela de Início</i>.</div>`}
     </div>
-    <div class="muted" style="text-align:center;font-size:12px;margin:8px 0 16px">Meus Gastos · funciona offline · v1.2</div>`;
+    <div class="card">
+      <h3>Indique para amigos</h3>
+      <div class="t2" style="font-size:14px;margin-bottom:12px">Mande o link. Cada pessoa instala no próprio celular e tem os próprios dados. Ninguém vê os gastos de ninguém.</div>
+      <button class="btn pri" data-act="share">Compartilhar o app</button>
+    </div>
+    <div class="muted" style="text-align:center;font-size:12px;margin:8px 16px 16px;line-height:1.5">🔒 Seus dados ficam apenas neste aparelho. Nada é enviado para a internet.<br>Meus Gastos · funciona offline · v1.4</div>`;
 }
 
 /* ================= Folha de lançamento ================= */
@@ -696,7 +775,7 @@ function centsToField(c){ return c ? (c/100).toLocaleString("pt-BR",{minimumFrac
 function openExpense(pre){
   pre = pre || {};
   const editing = !!pre.id;
-  let st = {v:pre.v||0, d:pre.d||"", c:pre.c||null, dt:pre.dt||today(), m: pre.m!==undefined ? pre.m : state.settings.lastMethod, catManual: !!pre.c};
+  let st = {v:pre.v||0, d:pre.d||"", c:pre.c||null, dt:pre.dt||today(), m: pre.m!==undefined ? pre.m : state.settings.lastMethod, catManual: !!pre.c, paid: pre.fx ? isPaid(pre) : undefined};
   if (!st.c && st.d) st.c = guessCat(st.d);
   const cats = state.cats.filter(c=>!c.hidden || c.id===st.c);
   openSheet(`
@@ -705,6 +784,7 @@ function openExpense(pre){
     <div class="field"><label for="fD">Descrição</label><input class="inp" id="fD" placeholder="Ex.: Almoço, Uber, Netflix" value="${esc(st.d)}" autocomplete="off" enterkeyhint="done"><div class="sugs" id="fSug"></div></div>
     <div class="field"><label>Categoria <span class="muted" id="fAuto" style="font-weight:500"></span></label><div class="cats" id="fCats">${cats.map(c=>`<button class="cat" data-c="${c.id}"><b>${c.emoji}</b><span>${esc(c.name)}</span></button>`).join("")}</div></div>
     <div class="field"><label>Data</label><div class="row" id="fDt"><button class="chip" data-dt="${today()}">Hoje</button><button class="chip" data-dt="${yesterday()}">Ontem</button><input type="date" id="fDate" value="${st.dt}" max="2100-12-31" aria-label="Escolher data"></div></div>
+    ${pre.fx?`<div class="field"><label>Situação</label><div class="seg"><button data-pd="0">⏰ A pagar</button><button data-pd="1">✓ Pago</button></div><div class="muted" style="font-size:12px;margin:6px 2px 0">📌 Gasto fixo. Mudanças aqui valem só para este mês; para todos os meses use Gastos fixos.</div></div>`:""}
     <div class="field"><label>Pagamento</label><div class="row" id="fM">${METHODS.map(([k,l])=>`<button class="chip" data-m="${k}">${l}</button>`).join("")}</div></div>
     <div class="btns ${editing?"two":""}">
       ${editing?`<button class="btn dan" id="fDel">Excluir</button><button class="btn pri" id="fSave">Salvar</button>`:
@@ -715,6 +795,7 @@ function openExpense(pre){
       body.querySelectorAll("[data-c]").forEach(b=>b.classList.toggle("on", b.dataset.c===st.c));
       body.querySelectorAll("[data-m]").forEach(b=>b.classList.toggle("on", b.dataset.m===st.m));
       body.querySelectorAll("[data-dt]").forEach(b=>b.classList.toggle("on", b.dataset.dt===st.dt));
+      body.querySelectorAll("[data-pd]").forEach(b=>b.classList.toggle("on", (b.dataset.pd==="1")===st.paid));
       body.querySelector("#fDate").value = st.dt;
       body.querySelector("#fAuto").textContent = (!st.catManual && st.c) ? "· sugerida automaticamente" : "";
     };
@@ -740,6 +821,7 @@ function openExpense(pre){
       if (b.dataset.c){ st.c=b.dataset.c; st.catManual=true; paint(); }
       else if (b.dataset.m){ st.m = st.m===b.dataset.m ? "" : b.dataset.m; paint(); }
       else if (b.dataset.dt){ st.dt=b.dataset.dt; paint(); }
+      else if (b.dataset.pd){ st.paid = b.dataset.pd==="1"; paint(); }
       else if (b.dataset.s){ const mm=state.memory[b.dataset.s]; if (mm){ st.d=mm.d; fD.value=mm.d; st.c=mm.c; st.catManual=true; if (!st.v){ st.v=mm.v; fV.value=centsToField(mm.v);} if (mm.m) st.m=mm.m; paint(); sugs(); } }
       else if (b.hasAttribute("data-close")) closeSheet();
     });
@@ -749,7 +831,7 @@ function openExpense(pre){
       st.d = fD.value.trim();
       if (!st.c) st.c = guessCat(st.d) || "outros";
       if (editing){
-        updateExpense(pre.id, {v:st.v, d:st.d||catById(st.c).name, c:st.c, dt:st.dt, m:st.m});
+        updateExpense(pre.id, Object.assign({v:st.v, d:st.d||catById(st.c).name, c:st.c, dt:st.dt, m:st.m}, pre.fx?{paid:st.paid}:{}));
         closeSheet(); render(); toast("Gasto atualizado");
       } else {
         const e = addExpense({v:st.v, d:st.d, c:st.c, dt:st.dt, m:st.m});
@@ -762,7 +844,7 @@ function openExpense(pre){
     body.querySelector("#fSave").onclick = ()=>doSave(false);
     const more = body.querySelector("#fSaveMore"); if (more) more.onclick = ()=>doSave(true);
     const del = body.querySelector("#fDel");
-    if (del) del.onclick = ()=>{ const e = deleteExpense(pre.id); closeSheet(); render(); toast("Gasto excluído", [["Desfazer",()=>{ state.expenses.push(e); save(); render(); }]]); };
+    if (del) del.onclick = ()=>{ const sk = pre.fx ? pre.fx+"|"+monthKey(pre.dt) : null; if (sk) state.fixedSkip[sk]=true; const e = deleteExpense(pre.id); closeSheet(); render(); toast(sk?"Removido deste mês":"Gasto excluído", [["Desfazer",()=>{ if (sk) delete state.fixedSkip[sk]; state.expenses.push(e); save(); render(); }]]); };
     paint(); sugs();
     if (!editing) setTimeout(()=>{ (st.v ? fD : fV).focus(); }, 280);
   });
@@ -815,6 +897,112 @@ function openBudget(){
     body.querySelector("#bClr").onclick = ()=>{ state.settings.budget=0; save(); closeSheet(); render(); };
     setTimeout(()=>i.focus(),280);
   });
+}
+
+/* ---------- Gastos fixos (cadastro) ---------- */
+function openFixed(){
+  const list = state.fixed.slice().sort((a,b)=>a.day-b.day);
+  openSheet(`<div class="sh-title"><h2>Gastos fixos</h2><button class="x-btn" data-close>✕</button></div>
+    <div class="t2" style="font-size:13.5px;margin-bottom:6px">Entram sozinhos nas despesas todo mês. Ficam <b style="color:var(--accent)">azuis (a pagar)</b> até o dia do vencimento e <b style="color:var(--good-ink)">verdes (pago)</b> a partir dele. Pagou antes? Toque no selo na tela inicial.</div>
+    ${list.length?`<div class="sumline" style="margin:4px 2px 2px"><span>${list.length} fixos</span><span>Total por mês <b>${money(sum(list))}</b></span></div>`+list.map(f=>`<button class="set" data-fx="${f.id}"><div class="ico">${catById(f.c).emoji}</div><div class="mid"><div class="d">${esc(f.d)}</div><div class="s">Todo dia ${f.day} · ${esc(catById(f.c).name)}${f.m?" · "+methodName(f.m):""}</div></div><div class="v" style="font-weight:650">${money(f.v)}</div></button>`).join(""):`<div class="empty"><div class="e">📌</div>Nenhum gasto fixo ainda.</div>`}
+    <div class="btns"><button class="btn pri" data-fx="__new">+ Novo gasto fixo</button></div>`, body=>{
+    body.onclick = ev=>{
+      if (ev.target.closest("[data-close]")) return closeSheet();
+      const b = ev.target.closest("[data-fx]"); if (!b) return;
+      editFixed(b.dataset.fx==="__new" ? null : state.fixed.find(f=>f.id===b.dataset.fx));
+    };
+  });
+}
+function editFixed(f){
+  const isNew = !f;
+  let st = {v: f?f.v:0, d: f?f.d:"", c: f?f.c:"fixos", day: f?f.day:new Date().getDate(), m: f?(f.m||""):state.settings.lastMethod};
+  const cats = state.cats.filter(c=>!c.hidden || c.id===st.c);
+  openSheet(`<div class="sh-title"><h2>${isNew?"Novo gasto fixo":"Editar gasto fixo"}</h2><button class="x-btn" data-back>‹</button></div>
+    <div class="money"><span>R$</span><input id="xV" inputmode="numeric" placeholder="0,00" value="${centsToField(st.v)}" aria-label="Valor"></div>
+    <div class="field"><label for="xD">Descrição</label><input class="inp" id="xD" value="${esc(st.d)}" placeholder="Ex.: Aluguel, Internet, Faculdade" autocomplete="off"></div>
+    <div class="field"><label for="xDay">Dia do vencimento</label><input class="inp" id="xDay" type="number" inputmode="numeric" min="1" max="31" value="${st.day}" style="max-width:120px"><div class="muted" style="font-size:12px;margin:6px 2px 0">Em meses mais curtos, vence no último dia do mês.</div></div>
+    <div class="field"><label>Categoria</label><div class="cats">${cats.map(c=>`<button class="cat" data-c="${c.id}"><b>${c.emoji}</b><span>${esc(c.name)}</span></button>`).join("")}</div></div>
+    <div class="field"><label>Pagamento</label><div class="row">${METHODS.map(([k,l])=>`<button class="chip" data-m="${k}">${l}</button>`).join("")}</div></div>
+    <div class="btns ${isNew?"":"two"}">${isNew?"":`<button class="btn dan" id="xDel">Excluir</button>`}<button class="btn pri" id="xOk">Salvar</button></div>`, body=>{
+    const fV = body.querySelector("#xV");
+    const paint = ()=>{ body.querySelectorAll("[data-c]").forEach(b=>b.classList.toggle("on", b.dataset.c===st.c)); body.querySelectorAll("[data-m]").forEach(b=>b.classList.toggle("on", b.dataset.m===st.m)); };
+    fV.addEventListener("input", ()=>{ const d=fV.value.replace(/\D/g,"").replace(/^0+/,"").slice(0,10); st.v = d?parseInt(d,10):0; fV.value=centsToField(st.v); });
+    body.querySelector("#xD").addEventListener("input", ev=>{ if (isNew && st.c==="fixos"){} });
+    body.onclick = ev=>{
+      const b = ev.target.closest("button"); if (!b) return;
+      if (b.dataset.c){ st.c=b.dataset.c; paint(); }
+      else if (b.dataset.m){ st.m = st.m===b.dataset.m ? "" : b.dataset.m; paint(); }
+      else if (b.hasAttribute("data-back")) openFixed();
+    };
+    body.querySelector("#xOk").onclick = ()=>{
+      st.d = body.querySelector("#xD").value.trim();
+      st.day = Math.max(1, Math.min(31, parseInt(body.querySelector("#xDay").value,10)||0));
+      if (!st.v){ shake(fV); toast("Informe o valor"); return; }
+      if (!st.d){ shake(body.querySelector("#xD")); toast("Informe a descrição"); return; }
+      if (!body.querySelector("#xDay").value){ shake(body.querySelector("#xDay")); return; }
+      const cur = monthKey(today());
+      if (isNew){
+        state.fixed.push({id:"f"+uid(), v:st.v, d:st.d, c:st.c, day:st.day, m:st.m, start:cur});
+      } else {
+        Object.assign(f, {v:st.v, d:st.d, c:st.c, day:st.day, m:st.m});
+        state.expenses.forEach(e=>{ if (e.fx===f.id && monthKey(e.dt)>=cur){ Object.assign(e,{v:st.v, d:st.d, c:st.c, m:st.m, dt:dueDate(monthKey(e.dt), st.day)}); } });
+      }
+      save(); ensureFixed(); render(); openFixed(); toast(isNew?"Gasto fixo cadastrado e incluído neste mês":"Gasto fixo atualizado");
+    };
+    const del = body.querySelector("#xDel");
+    if (del) del.onclick = ()=> confirmBox("Excluir gasto fixo?", `“${f.d}” deixa de entrar nos próximos meses e sai deste mês. Os meses anteriores continuam no histórico.`, "Excluir", ()=>{
+      const cur = monthKey(today());
+      state.fixed = state.fixed.filter(x=>x.id!==f.id);
+      state.expenses = state.expenses.filter(e=>!(e.fx===f.id && monthKey(e.dt)>=cur));
+      save(); render(); openFixed(); toast("Gasto fixo excluído");
+    });
+    paint();
+  });
+}
+
+/* ---------- Nome / boas-vindas / compartilhar ---------- */
+const APP_URL = location.hostname.endsWith("github.io") ? location.origin + location.pathname.replace(/index\.html$/,"") : "https://ler0x1.github.io/meus-gastos/";
+function showWelcome(){
+  const w = $("#welcome");
+  w.innerHTML = `<div class="wrap">
+    <img src="icon-192.png" alt="">
+    <h1>Bem-vindo ao Meus Gastos</h1>
+    <div class="t2" style="font-size:16px">Seu controle de despesas, simples e rápido.</div>
+    <div style="margin:22px 0 8px">
+      <div class="feat"><div class="ico">⚡</div><div><b>Lance em segundos</b><br><span class="t2">Digite “uber 23,50” e pronto.</span></div></div>
+      <div class="feat"><div class="ico">🧠</div><div><b>Ele aprende com você</b><br><span class="t2">Sugere a categoria e o valor sozinho.</span></div></div>
+      <div class="feat"><div class="ico">📌</div><div><b>Gastos fixos e valor por dia</b><br><span class="t2">Contas do mês e quanto você pode gastar hoje.</span></div></div>
+      <div class="feat"><div class="ico">🔒</div><div><b>Privado e offline</b><br><span class="t2">Tudo fica só no seu celular, sem cadastro.</span></div></div>
+    </div>
+    <form id="wForm" autocomplete="off" style="margin-top:auto;padding-top:12px">
+      <div class="field"><label for="wName" style="font-size:15px;color:var(--text)">Como você quer ser chamado?</label>
+      <input class="inp" id="wName" maxlength="30" placeholder="Seu nome ou apelido" enterkeyhint="go" autocapitalize="words"></div>
+      <button class="btn pri" id="wGo" style="opacity:.5">Começar</button>
+    </form></div>`;
+  w.classList.remove("hidden");
+  const i = w.querySelector("#wName"), go = w.querySelector("#wGo");
+  i.addEventListener("input", ()=>{ go.style.opacity = i.value.trim() ? 1 : .5; });
+  w.querySelector("#wForm").onsubmit = ev=>{
+    ev.preventDefault();
+    const n = i.value.trim(); if (!n){ shake(i); i.focus(); return; }
+    state.settings.name = n; save();
+    w.classList.add("hidden"); w.innerHTML = ""; setTab("inicio");
+    toast(`Prazer, ${esc(n.split(/\s+/)[0])}! Toque no + para registrar seu primeiro gasto.`);
+  };
+}
+function openName(){
+  openSheet(`<div class="sh-title"><h2>Seu nome</h2><button class="x-btn" data-close>✕</button></div>
+    <div class="field"><label for="nN">Como você quer ser chamado?</label><input class="inp" id="nN" maxlength="30" value="${esc(state.settings.name||"")}" autocapitalize="words"></div>
+    <div class="btns"><button class="btn pri" id="nOk">Salvar</button></div>`, body=>{
+    body.querySelector("[data-close]").onclick = ()=>closeSheet();
+    body.querySelector("#nOk").onclick = ()=>{ const n = body.querySelector("#nN").value.trim(); if (!n){ shake(body.querySelector("#nN")); return; } state.settings.name = n; save(); closeSheet(); render(); setTab(ui.tab); toast("Nome atualizado"); };
+  });
+}
+async function shareApp(){
+  const text = "Tô usando o Meus Gastos para controlar meus gastos: é rápido, funciona sem internet e os dados ficam só no celular. Abre no Chrome e toca em Instalar:";
+  try { if (navigator.share){ await navigator.share({title:"Meus Gastos", text, url:APP_URL}); return; } } catch(e){ if (e && e.name==="AbortError") return; }
+  try { await navigator.clipboard.writeText(text+" "+APP_URL); toast("Link copiado! Cole no WhatsApp."); }
+  catch(e){ toast("Link do app: "+APP_URL); }
 }
 
 /* ---------- Salário ---------- */
@@ -978,6 +1166,8 @@ $("#fab").onclick = ()=>openExpense();
 $("#mPrev").onclick = ()=>{ ui.month = shiftMonth(ui.month,-1); ui.cat=null; render(); };
 $("#mNext").onclick = ()=>{ ui.month = shiftMonth(ui.month,1); ui.cat=null; render(); };
 $("main").addEventListener("click", ev=>{
+  const pb = ev.target.closest("[data-paid]"); if (pb){ togglePaid(pb.dataset.paid); return; }
+  const ed = ev.target.closest("[data-edit]"); if (ed && !ed.matches("button")){ const e = state.expenses.find(x=>x.id===ed.dataset.edit); if (e) openExpense(e); return; }
   const b = ev.target.closest("button"); if (!b) return;
   if (b.dataset.edit){ const e = state.expenses.find(x=>x.id===b.dataset.edit); if (e) openExpense(e); return; }
   if (b.dataset.rep!==undefined){ const m = state.memory[b.dataset.rep]; if (m) openExpense({v:m.v, d:m.d, c:m.c, m:m.m}); return; }
@@ -987,6 +1177,9 @@ $("main").addEventListener("click", ev=>{
   const act = b.dataset.act;
   if (act==="paste") openPaste();
   else if (act==="budget") openBudget();
+  else if (act==="name") openName();
+  else if (act==="share") shareApp();
+  else if (act==="fixed") openFixed();
   else if (act==="salary") openSalary();
   else if (act==="reports") setTab("relatorios");
   else if (act==="list"){ ui.cat=null; setTab("gastos"); }
@@ -996,11 +1189,14 @@ $("main").addEventListener("click", ev=>{
   else if (act==="restore") openRestore();
   else if (act==="csv") exportCSV();
   else if (act==="install" && deferredInstall){ deferredInstall.prompt(); deferredInstall.userChoice.finally(()=>{ deferredInstall=null; render(); }); }
-  else if (act==="wipe") confirmBox("Apagar tudo?", `Isso remove os ${state.expenses.length} gastos, categorias personalizadas e a memória deste aparelho. Faça um backup antes, se quiser guardar.`, "Apagar tudo", ()=>{ state = freshState(); save(); applyTheme(); closeSheet(); render(); toast("Dados apagados"); });
+  else if (act==="wipe") confirmBox("Apagar tudo?", `Isso remove os ${state.expenses.length} gastos, categorias personalizadas e a memória deste aparelho. Faça um backup antes, se quiser guardar.`, "Apagar tudo", ()=>{ state = freshState(); save(); applyTheme(); closeSheet(); render(); showWelcome(); });
 });
 
 /* ================= Início ================= */
+ensureFixed();
 applyTheme(); renderBanner(); setTab("inicio");
+if (!(state.settings.name||"").trim()) showWelcome();
+document.addEventListener("visibilitychange", ()=>{ if (!document.hidden){ ensureFixed(); render(); } });
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")){
   window.addEventListener("load", ()=>{ try { navigator.serviceWorker.register("sw.js").catch(()=>{}); } catch(e){} });
 }
