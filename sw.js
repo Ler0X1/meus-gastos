@@ -1,7 +1,7 @@
 // Meus Gastos — service worker
 // HTML: rede primeiro (pega sempre a versão nova do GitHub quando há internet), cache se estiver offline.
 // Demais arquivos: cache primeiro, atualizando em segundo plano.
-const CACHE = "meus-gastos-v7";
+const CACHE = "meus-gastos-v8";
 const FILES = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {

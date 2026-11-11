@@ -85,6 +85,23 @@ input,select,textarea{font:inherit;color:var(--text)}
 .status{display:inline-flex;align-items:center;gap:4px;font-weight:600}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
 
+/* pizza */
+.pie{display:flex;flex-direction:column;align-items:center;margin:6px 0 4px}
+.pie-wrap{position:relative;width:210px;height:210px}
+.pie-wrap svg{width:100%;height:100%;display:block}
+.pie-wrap svg circle.seg{cursor:pointer;transition:opacity .15s}
+.pie-c{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:none;padding:0 42px}
+.pie-c .k{font-size:12.5px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.pie-c .x{font-size:22px;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pie-c .p{font-size:12.5px;color:var(--text2);font-variant-numeric:tabular-nums}
+.legend{width:100%;margin-top:10px}
+.lg{display:grid;grid-template-columns:12px 1fr auto auto;gap:10px;align-items:center;width:100%;padding:8px 2px;text-align:left;border-radius:10px;transition:opacity .15s}
+.lg+.lg{border-top:1px solid var(--border)}
+.lg .sw{width:12px;height:12px;border-radius:4px}
+.lg .n{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lg .pc{font-size:13px;color:var(--text2);font-variant-numeric:tabular-nums;min-width:38px;text-align:right}
+.lg .val{font-size:14px;font-weight:650;font-variant-numeric:tabular-nums;min-width:88px;text-align:right}
+.dim{opacity:.3}
 /* adição rápida */
 .quick{display:flex;gap:8px}
 .quick input{flex:1;min-width:0;height:48px;border-radius:14px;border:1px solid var(--border);background:var(--card2);padding:0 14px;font-size:16px;outline:none}
@@ -263,8 +280,10 @@ button.badge{font-size:12px;padding:6px 11px;border:1px solid transparent}
 "use strict";
 /* ================= Dados e armazenamento ================= */
 const KEY = "meusgastos.v1";
-const APP_VERSION = "1.6";
+const APP_VERSION = "1.7";
 const NOVIDADES = [
+  "🥧 Gráfico de pizza na tela inicial: toque numa fatia para ver valor e %",
+  "✨ Tela inicial mais limpa: lance seus gastos pelo + azul",
   "🪙 Ícone novo: o Fiscal está de olho nos seus gastos",
   "🔄 O app agora se atualiza sozinho quando abre com internet",
   "📌 Gastos fixos: entram todo mês, com aviso de “a pagar” e “pago”",
@@ -514,8 +533,7 @@ function setTab(t){
   document.querySelectorAll(".nav .tab").forEach(b=>b.classList.toggle("on", b.dataset.tab===t));
   ["inicio","gastos","relatorios","ajustes"].forEach(v=>$("#v-"+v).classList.toggle("hidden", v!==t));
   $("#monthNav").classList.toggle("hidden", t==="ajustes");
-  const nm = (state.settings.name||"").trim().split(/\s+/)[0];
-  $("#pageTitle").textContent = {inicio: nm ? "Olá, "+nm+" 👋" : "Meus Gastos",gastos:"Gastos",relatorios:"Relatórios",ajustes:"Ajustes"}[t];
+  $("#pageTitle").textContent = {inicio: (state.settings.name||"").trim() || "Meus Gastos",gastos:"Gastos",relatorios:"Relatórios",ajustes:"Ajustes"}[t];
   render(); window.scrollTo(0,0);
 }
 function render(){
@@ -541,6 +559,42 @@ function catBarsHTML(list, limit){
     return `<button class="cbar" data-catf="${r.c}"><div class="n">${c.emoji} ${esc(c.name)}</div><div class="val">${money(r.v)}</div><div class="track"><i style="width:${Math.max(2,r.v/max*100)}%"></i></div><div class="pc">${pc.toFixed(0)}%</div></button>`; }).join("");
 }
 
+/* ---------- Pizza ---------- */
+const PIE_L = ["#2a78d6","#eb6834","#1baf7a","#eda100","#e87ba4","#008300","#6250d6"];
+const PIE_D = ["#3987e5","#d95926","#199e70","#c98500","#d55181","#008300","#9085e9"];
+const isDark = () => { const t = state.settings.theme; return t==="dark" || (t==="auto" && matchMedia("(prefers-color-scheme: dark)").matches); };
+function pieRows(list){
+  const rows = catTotals(list), pal = isDark() ? PIE_D : PIE_L;
+  let out = rows.length > 7 ? rows.slice(0,6) : rows.slice();
+  out = out.map((r,i)=>{ const c = catById(r.c); return {label:c.emoji+" "+c.name, v:r.v, color:pal[i], cat:r.c}; });
+  if (rows.length > 7){ const rest = rows.slice(6); out.push({label:"➕ Demais ("+rest.length+")", v:sum(rest), color:"#898781", cat:null}); }
+  return out;
+}
+function pieHTML(list, tot){
+  const rows = pieRows(list), R0 = 80, C = 2*Math.PI*R0, gap = rows.length>1 ? 3 : 0;
+  let off = 0, segs = "";
+  rows.forEach((r,i)=>{ const len = r.v/tot*C; const vis = Math.max(0.5, len-gap);
+    segs += `<circle class="seg" data-pi="${i}" cx="100" cy="100" r="${R0}" fill="none" stroke="${r.color}" stroke-width="34" stroke-dasharray="${vis} ${C-vis}" stroke-dashoffset="${-off}" transform="rotate(-90 100 100)"><title>${esc(r.label)}: ${money(r.v)}</title></circle>`;
+    off += len; });
+  if (!rows.length) segs = `<circle cx="100" cy="100" r="${R0}" fill="none" stroke="var(--card2)" stroke-width="34"/>`;
+  return `<div class="pie"><div class="pie-wrap"><svg viewBox="0 0 200 200" role="img" aria-label="Gastos por categoria">${segs}</svg>
+      <div class="pie-c" id="pieC"></div></div>
+    ${rows.length?`<div class="legend">${rows.map((r,i)=>`<button class="lg" data-pi="${i}"><span class="sw" style="background:${r.color}"></span><span class="n">${esc(r.label)}</span><span class="pc">${(r.v/tot*100).toFixed(r.v/tot<0.1?1:0).replace(".",",")}%</span><span class="val">${money(r.v)}</span></button>`).join("")}</div>`:""}
+  </div>`;
+}
+function bindPie(root, list, tot){
+  const rows = pieRows(list); let sel = null;
+  const center = ()=>{
+    const c = root.querySelector("#pieC"); if (!c) return;
+    const fs = v => { const n = money(v).length; return n>=13 ? 16 : n>=12 ? 17.5 : n>=11 ? 19.5 : 22; };
+    if (sel===null) c.innerHTML = `<div class="k">Total do mês</div><div class="x" style="font-size:${fs(tot)}px">${money(tot)}</div><div class="p">${rows.length?(n=>n+(n===1?" categoria":" categorias"))(catTotals(list).length):"sem gastos"}</div>`;
+    else { const r = rows[sel]; c.innerHTML = `<div class="k">${esc(r.label)}</div><div class="x" style="font-size:${fs(r.v)}px">${money(r.v)}</div><div class="p">${(r.v/tot*100).toFixed(1).replace(".",",")}% do total</div>`; }
+    root.querySelectorAll("[data-pi]").forEach(el=>el.classList.toggle("dim", sel!==null && +el.dataset.pi!==sel));
+  };
+  root.querySelectorAll("[data-pi]").forEach(el=>el.addEventListener("click", ev=>{ ev.stopPropagation(); const i = +el.dataset.pi; sel = sel===i ? null : i; center(); }));
+  center();
+}
+
 /* ---------- Início ---------- */
 function renderHome(){
   const list = inMonth(ui.month), tot = sum(list);
@@ -562,7 +616,6 @@ function renderHome(){
   } else {
     bud = `<div class="hint" style="margin-top:10px"><span>Defina um limite mensal para acompanhar.</span><button data-act="budget">Definir orçamento</button></div>`;
   }
-  const recents = suggestions("",8);
   const fixList = list.filter(e=>e.fx).sort((a,b)=>a.dt.localeCompare(b.dt));
   let fixCard = "";
   if (!state.fixed.length){
@@ -579,26 +632,17 @@ function renderHome(){
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
   $("#v-inicio").innerHTML = (deferredInstall && !standalone ? `<div class="card" style="display:flex;align-items:center;gap:12px;background:var(--accent-soft)"><div class="ico">📲</div><div style="flex:1;font-size:14px"><b>Instale o app no celular</b><br><span class="t2">Abre pelo ícone e funciona sem internet.</span></div><button class="btn pri" data-act="install" style="width:auto;height:42px;padding:0 16px;font-size:15px">Instalar</button></div>` : "") + `
     <div class="card hero">
-      <div class="lbl">Gasto em ${monthLabel(ui.month)}</div>
-      <div class="big">${money(tot)}</div>
-      <div class="delta">${delta||"Nenhum gasto registrado ainda"}</div>
+      <h3 style="margin-bottom:2px">Gastos de ${monthLabel(ui.month)} <span class="muted" style="font-size:12px;font-weight:500">${list.length?"toque para detalhar":""}</span></h3>
+      ${pieHTML(list, tot)}
+      <div class="delta" style="text-align:center">${delta||"Nenhum gasto registrado ainda · toque no + para começar"}</div>
       ${bud}
-    </div>
-    <div class="card">
-      <form class="quick" id="quickForm" autocomplete="off">
-        <input id="quickIn" placeholder="Ex.: uber 23,50" enterkeyhint="done" aria-label="Adicionar gasto rápido">
-        <button aria-label="Adicionar">➤</button>
-      </form>
-      <div class="hint"><span>Digite a descrição e o valor e pronto.</span><button data-act="paste">Colar vários</button></div>
-      ${recents.length?`<div style="margin-top:12px" class="chips">${recents.map(r=>`<button class="chip" data-rep="${esc(r.key)}">${catById(r.c).emoji} ${esc(r.d)} <small>${money(r.v)}</small></button>`).join("")}</div>`:""}
     </div>
     ${fixCard}
     ${list.length?`
-    <div class="card"><h3>Onde foi o dinheiro <button class="link" data-act="reports">Ver tudo</button></h3>${catBarsHTML(list,4)}</div>
     <div class="card"><h3>Últimos gastos <button class="link" data-act="list">Ver todos</button></h3>${last.map(e=>itemHTML(e,true)).join("")}</div>`
-    : `<div class="card empty"><div class="e">🧾</div><b>Nenhum gasto em ${monthLabel(ui.month)}</b><div style="margin-top:4px">Toque no <b>+</b> ou digite acima para registrar.</div></div>`}
+    : `<div class="card empty"><div class="e">🧾</div><b>Nenhum gasto em ${monthLabel(ui.month)}</b><div style="margin-top:4px">Toque no <b>+</b> azul para registrar.</div></div>`}
   `;
-  $("#quickForm").onsubmit = ev => { ev.preventDefault(); quickAdd($("#quickIn").value); };
+  bindPie($("#v-inicio"), list, tot);
 }
 function quickAdd(text){
   text = text.trim(); if (!text) { openExpense(); return; }
@@ -978,7 +1022,7 @@ function showWelcome(){
     <h1>Bem-vindo ao Meus Gastos</h1>
     <div class="t2" style="font-size:16px">Seu controle de despesas, simples e rápido.</div>
     <div style="margin:22px 0 8px">
-      <div class="feat"><div class="ico">⚡</div><div><b>Lance em segundos</b><br><span class="t2">Digite “uber 23,50” e pronto.</span></div></div>
+      <div class="feat"><div class="ico">⚡</div><div><b>Lance em segundos</b><br><span class="t2">Toque no + e registre seu gasto rapidinho.</span></div></div>
       <div class="feat"><div class="ico">🧠</div><div><b>Ele aprende com você</b><br><span class="t2">Sugere a categoria e o valor sozinho.</span></div></div>
       <div class="feat"><div class="ico">📌</div><div><b>Gastos fixos e valor por dia</b><br><span class="t2">Contas do mês e quanto você pode gastar hoje.</span></div></div>
       <div class="feat"><div class="ico">🔒</div><div><b>Privado e offline</b><br><span class="t2">Tudo fica só no seu celular, sem cadastro.</span></div></div>
