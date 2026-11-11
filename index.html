@@ -277,7 +277,7 @@ const METHODS = [["pix","Pix"],["debito","Débito"],["credito","Crédito"],["din
 let storageOk = true;
 function freshState(){
   return {expenses:[], cats:JSON.parse(JSON.stringify(DEFAULT_CATS)), memory:{},
-          settings:{budget:0, theme:"auto", lastMethod:"pix", lastBackup:0}};
+          settings:{budget:0, salary:0, theme:"auto", lastMethod:"pix", lastBackup:0}};
 }
 function load(){
   let s = null;
@@ -567,7 +567,24 @@ function renderReports(){
   const meth = {}; list.forEach(e=>{ const k=e.m||"—"; meth[k]=(meth[k]||0)+e.v; });
   const methRows = Object.entries(meth).sort((a,b)=>b[1]-a[1]);
   const mmax = methRows.length?methRows[0][1]:1;
-  $("#v-relatorios").innerHTML = `
+  const sal = state.settings.salary||0, perDay = Math.round(sal/30);
+  let pd;
+  if (!sal){
+    pd = `<div class="card"><h3>Valor por dia</h3><div class="t2" style="font-size:14px">Informe seu salário e o app divide por 30 para mostrar quanto você pode gastar por dia.</div><div class="btns"><button class="btn pri" data-act="salary">Informar salário</button></div></div>`;
+  } else {
+    const allowed = perDay*elapsed, saldo = allowed - tot;
+    const todaySpent = isCur ? sum(list.filter(e=>e.dt===today())) : 0;
+    const tLeft = perDay - todaySpent;
+    const stTxt = (ok)=> ok ? `<span class="status" style="color:var(--good-ink)"><span class="dot" style="background:var(--good)"></span>` : `<span class="status" style="color:var(--crit)"><span class="dot" style="background:var(--crit)"></span>`;
+    pd = `<div class="card"><h3>Valor por dia <button class="link" data-act="salary">Editar salário</button></h3>
+      <div class="hero"><div class="big" style="font-size:34px">${money(perDay)}</div><div class="delta">Salário ${money(sal)} ÷ 30 dias</div></div>
+      <div class="stats" style="margin-top:14px">
+        ${isCur?`<div class="stat"><div class="k">Gasto hoje</div><div class="x">${money(todaySpent)}</div><div class="sub">${tLeft>=0?"Ainda pode "+money(tLeft):"Passou "+money(-tLeft)}</div></div>`:""}
+        <div class="stat"><div class="k">Sua média diária</div><div class="x">${money(avg)}</div><div class="sub">${elapsed?(avg<=perDay?"Abaixo do limite":"Acima do limite"):"—"}</div></div>
+        <div class="stat" style="grid-column:1 / -1"><div class="k">Saldo acumulado ${isCur?"até hoje":"no mês"}</div><div class="x">${elapsed?stTxt(saldo>=0)+(saldo>=0?"Sobrando ":"Passou ")+money(Math.abs(saldo))+"</span>":"—"}</div><div class="sub" style="white-space:normal">${elapsed?"Disponível em "+elapsed+" dia(s): "+money(allowed)+"<br>Gasto no período: "+money(tot):""}</div></div>
+      </div></div>`;
+  }
+  $("#v-relatorios").innerHTML = pd + `
     <div class="card">
       <div class="stats">
         <div class="stat"><div class="k">Total do mês</div><div class="x">${money(tot)}</div><div class="sub">${list.length} lançamentos</div></div>
@@ -583,12 +600,12 @@ function renderReports(){
     <div class="card"><h3>Últimos 6 meses</h3><div class="chart" id="chMonths"></div></div>
     ${methRows.length?`<div class="card"><h3>Forma de pagamento</h3>${methRows.map(([k,v])=>`<div class="cbar"><div class="n">${k==="—"?"Não informado":methodName(k)}</div><div class="val">${money(v)}</div><div class="track"><i style="width:${Math.max(2,v/mmax*100)}%"></i></div><div class="pc">${(v/tot*100).toFixed(0)}%</div></div>`).join("")}</div>`:""}
   `;
-  if (list.length) columnChart($("#chDays"), days, {avg, labelEvery: dim>15?5:1});
+  if (list.length) columnChart($("#chDays"), days, {avg, limit: perDay, labelEvery: dim>15?5:1});
   columnChart($("#chMonths"), months, {highlightCur:true, labelAll:true});
 }
 function columnChart(el, data, opt){
   const W=340, H=150, pl=4, pr=4, pt=18, pb=20;
-  const max = Math.max(1, ...data.map(d=>d.v), opt.avg||0);
+  const max = Math.max(1, ...data.map(d=>d.v), opt.avg||0, opt.limit||0);
   const n = data.length, slot = (W-pl-pr)/n, bw = Math.max(3, Math.min(34, slot-2));
   const y = v => pt + (H-pt-pb) * (1 - v/max);
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de colunas">`;
@@ -603,7 +620,8 @@ function columnChart(el, data, opt){
     if (opt.highlightCur && d.cur && d.v>0) s += `<text class="axis-t" x="${x+bw/2}" y="${top-5}" text-anchor="middle" style="fill:var(--text2);font-weight:600">${moneyShort(d.v)}</text>`;
     s += `<rect class="hit" x="${pl+i*slot}" y="0" width="${slot}" height="${H}" data-i="${i}"/>`;
   });
-  if (opt.avg){ const ya=y(opt.avg); s += `<line x1="${pl}" x2="${W-pr}" y1="${ya}" y2="${ya}" stroke="var(--text2)" stroke-width="1" stroke-dasharray="3 3"/><text class="axis-t" x="${W-pr}" y="${ya-4}" text-anchor="end">média ${moneyShort(opt.avg)}</text>`; }
+  if (opt.avg){ const ya=y(opt.avg); s += `<line x1="${pl}" x2="${W-pr}" y1="${ya}" y2="${ya}" stroke="var(--text2)" stroke-width="1" stroke-dasharray="3 3"/><text class="axis-t" x="${W-pr}" y="${opt.limit && Math.abs(y(opt.limit)-ya)<14 ? ya+11 : ya-4}" text-anchor="end" style="paint-order:stroke;stroke:var(--card);stroke-width:3px">média ${moneyShort(opt.avg)}</text>`; }
+  if (opt.limit){ const yl=y(opt.limit); s += `<line x1="${pl}" x2="${W-pr}" y1="${yl}" y2="${yl}" stroke="var(--crit)" stroke-width="1.5"/><text class="axis-t" x="${W-pr}" y="${yl-4}" text-anchor="end" style="fill:var(--crit);font-weight:600;paint-order:stroke;stroke:var(--card);stroke-width:3px">por dia ${moneyShort(opt.limit)}</text>`; }
   s += `</svg><div class="tip"></div>`;
   el.innerHTML = s;
   const tip = el.querySelector(".tip"), svg = el.querySelector("svg");
@@ -625,6 +643,7 @@ function renderSettings(){
   $("#v-ajustes").innerHTML = `
     <div class="card">
       <button class="set" data-act="budget"><div class="ico">🎯</div><div class="mid"><div class="d">Orçamento mensal</div><div class="s">${s.budget?money(s.budget):"Não definido"}</div></div><div class="chev">›</div></button>
+      <button class="set" data-act="salary"><div class="ico">💰</div><div class="mid"><div class="d">Salário (valor por dia)</div><div class="s">${s.salary?money(s.salary)+" → "+money(Math.round(s.salary/30))+"/dia":"Não informado"}</div></div><div class="chev">›</div></button>
       <button class="set" data-act="cats"><div class="ico">🏷️</div><div class="mid"><div class="d">Categorias</div><div class="s">${state.cats.filter(c=>!c.hidden).length} ativas · editar, criar, ocultar</div></div><div class="chev">›</div></button>
       <button class="set" data-act="memory"><div class="ico">🧠</div><div class="mid"><div class="d">Memória do app</div><div class="s">${memN} descrições aprendidas</div></div><div class="chev">›</div></button>
       <button class="set" data-act="paste"><div class="ico">📋</div><div class="mid"><div class="d">Colar vários gastos</div><div class="s">Cole uma lista e importe de uma vez</div></div><div class="chev">›</div></button>
@@ -647,7 +666,7 @@ function renderSettings(){
       `${deferredInstall?`<button class="btn pri" data-act="install" style="margin-bottom:12px">Instalar na tela inicial</button>`:""}
       <div class="t2" style="font-size:14px;line-height:1.5"><b>Android (Chrome):</b> menu ⋮ → <i>Instalar app</i> ou <i>Adicionar à tela inicial</i>.<br><b>iPhone (Safari):</b> botão Compartilhar → <i>Adicionar à Tela de Início</i>.</div>`}
     </div>
-    <div class="muted" style="text-align:center;font-size:12px;margin:8px 0 16px">Meus Gastos · funciona offline · v1.0</div>`;
+    <div class="muted" style="text-align:center;font-size:12px;margin:8px 0 16px">Meus Gastos · funciona offline · v1.1</div>`;
 }
 
 /* ================= Folha de lançamento ================= */
@@ -792,6 +811,24 @@ function openBudget(){
     body.querySelector("[data-close]").onclick = ()=>closeSheet();
     body.querySelector("#bOk").onclick = ()=>{ state.settings.budget=v; save(); closeSheet(); render(); toast("Orçamento salvo"); };
     body.querySelector("#bClr").onclick = ()=>{ state.settings.budget=0; save(); closeSheet(); render(); };
+    setTimeout(()=>i.focus(),280);
+  });
+}
+
+/* ---------- Salário ---------- */
+function openSalary(){
+  let v = state.settings.salary||0;
+  const prev = ()=> v ? `Valor por dia: <b>${money(Math.round(v/30))}</b>` : "Digite o valor que você recebe por mês.";
+  openSheet(`<div class="sh-title"><h2>Salário mensal</h2><button class="x-btn" data-close>✕</button></div>
+    <div class="t2" style="font-size:14px">O app divide por 30 para calcular quanto você pode gastar por dia. Atualize sempre que seu salário mudar.</div>
+    <div class="money" style="margin-top:16px"><span>R$</span><input id="sV" inputmode="numeric" placeholder="0,00" value="${centsToField(v)}"></div>
+    <div class="t2" id="sPrev" style="text-align:center;font-size:15px">${prev()}</div>
+    <div class="btns two"><button class="btn sec" id="sClr">Remover</button><button class="btn pri" id="sOk">Salvar</button></div>`, body=>{
+    const i = body.querySelector("#sV");
+    i.addEventListener("input", ()=>{ const d=i.value.replace(/\D/g,"").replace(/^0+/,"").slice(0,10); v = d?parseInt(d,10):0; i.value=centsToField(v); body.querySelector("#sPrev").innerHTML = prev(); });
+    body.querySelector("[data-close]").onclick = ()=>closeSheet();
+    body.querySelector("#sOk").onclick = ()=>{ state.settings.salary=v; save(); closeSheet(); render(); toast(v?"Salário salvo · "+money(Math.round(v/30))+"/dia":"Salário removido"); };
+    body.querySelector("#sClr").onclick = ()=>{ state.settings.salary=0; save(); closeSheet(); render(); };
     setTimeout(()=>i.focus(),280);
   });
 }
@@ -948,6 +985,7 @@ $("main").addEventListener("click", ev=>{
   const act = b.dataset.act;
   if (act==="paste") openPaste();
   else if (act==="budget") openBudget();
+  else if (act==="salary") openSalary();
   else if (act==="reports") setTab("relatorios");
   else if (act==="list"){ ui.cat=null; setTab("gastos"); }
   else if (act==="cats") openCats();
