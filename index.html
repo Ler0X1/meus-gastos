@@ -263,6 +263,14 @@ button.badge{font-size:12px;padding:6px 11px;border:1px solid transparent}
 "use strict";
 /* ================= Dados e armazenamento ================= */
 const KEY = "meusgastos.v1";
+const APP_VERSION = "1.5";
+const NOVIDADES = [
+  "🔄 O app agora se atualiza sozinho quando abre com internet",
+  "📌 Gastos fixos: entram todo mês, com aviso de “a pagar” e “pago”",
+  "👋 Tela de boas-vindas com seu nome",
+  "📤 Botão para indicar o app aos amigos (em Ajustes)",
+  "💰 Valor por dia: salário ÷ 30, em Relatórios"
+];
 const DEFAULT_CATS = [
   {id:"alim",   name:"Alimentação", emoji:"🍽️"},
   {id:"merc",   name:"Mercado",     emoji:"🛒"},
@@ -747,7 +755,7 @@ function renderSettings(){
       <div class="t2" style="font-size:14px;margin-bottom:12px">Mande o link. Cada pessoa instala no próprio celular e tem os próprios dados. Ninguém vê os gastos de ninguém.</div>
       <button class="btn pri" data-act="share">Compartilhar o app</button>
     </div>
-    <div class="muted" style="text-align:center;font-size:12px;margin:8px 16px 16px;line-height:1.5">🔒 Seus dados ficam apenas neste aparelho. Nada é enviado para a internet.<br>Meus Gastos · funciona offline · v1.4</div>`;
+    <div class="muted" style="text-align:center;font-size:12px;margin:8px 16px 16px;line-height:1.5">🔒 Seus dados ficam apenas neste aparelho. Nada é enviado para a internet.<br>Meus Gastos · funciona offline · v${APP_VERSION}</div>`;
 }
 
 /* ================= Folha de lançamento ================= */
@@ -986,7 +994,7 @@ function showWelcome(){
     ev.preventDefault();
     const n = i.value.trim(); if (!n){ shake(i); i.focus(); return; }
     state.settings.name = n; save();
-    w.classList.add("hidden"); w.innerHTML = ""; setTab("inicio");
+    w.classList.add("hidden"); w.innerHTML = ""; setTab("inicio"); checkVersion();
     toast(`Prazer, ${esc(n.split(/\s+/)[0])}! Toque no + para registrar seu primeiro gasto.`);
   };
 }
@@ -1003,6 +1011,32 @@ async function shareApp(){
   try { if (navigator.share){ await navigator.share({title:"Meus Gastos", text, url:APP_URL}); return; } } catch(e){ if (e && e.name==="AbortError") return; }
   try { await navigator.clipboard.writeText(text+" "+APP_URL); toast("Link copiado! Cole no WhatsApp."); }
   catch(e){ toast("Link do app: "+APP_URL); }
+}
+
+/* ---------- Novidades e atualização ---------- */
+function showWhatsNew(){
+  openSheet(`<div class="sh-title"><h2>✨ App atualizado · v${APP_VERSION}</h2><button class="x-btn" data-close>✕</button></div>
+    <div class="t2" style="font-size:14px;margin-bottom:8px">Seus gastos continuam salvos. Veja o que mudou:</div>
+    ${NOVIDADES.map(n=>`<div class="set" style="font-size:15px">${esc(n)}</div>`).join("")}
+    <div class="btns"><button class="btn pri" data-close>Entendi</button></div>`, body=>{
+    body.onclick = ev=>{ if (ev.target.closest("[data-close]")) closeSheet(); };
+  });
+}
+function checkVersion(){
+  const prev = state.settings.seenVersion;
+  if (prev === APP_VERSION) return;
+  const show = prev ? true : state.expenses.length>0;
+  state.settings.seenVersion = APP_VERSION; save();
+  if (show) setTimeout(showWhatsNew, 500);
+}
+function showUpdateBar(){
+  if ($("#updBar")) return;
+  const d = document.createElement("div");
+  d.id = "updBar"; d.className = "card";
+  d.style.cssText = "display:flex;align-items:center;gap:12px;background:var(--accent);color:#fff;border:0";
+  d.innerHTML = `<div style="flex:1;font-size:14px"><b>Nova versão disponível 🎉</b><br>Seus gastos ficam salvos.</div><button class="btn" style="width:auto;height:40px;padding:0 16px;background:#fff;color:#1c5cab;font-size:15px" id="updGo">Atualizar</button>`;
+  $("#banner").after(d);
+  d.querySelector("#updGo").onclick = ()=>location.reload();
 }
 
 /* ---------- Salário ---------- */
@@ -1195,10 +1229,22 @@ $("main").addEventListener("click", ev=>{
 /* ================= Início ================= */
 ensureFixed();
 applyTheme(); renderBanner(); setTab("inicio");
-if (!(state.settings.name||"").trim()) showWelcome();
+if (!(state.settings.name||"").trim()){ state.settings.seenVersion = state.expenses.length ? state.settings.seenVersion : APP_VERSION; showWelcome(); }
+else checkVersion();
 document.addEventListener("visibilitychange", ()=>{ if (!document.hidden){ ensureFixed(); render(); } });
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")){
-  window.addEventListener("load", ()=>{ try { navigator.serviceWorker.register("sw.js").catch(()=>{}); } catch(e){} });
+  window.addEventListener("load", ()=>{
+    try {
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.register("sw.js").then(reg=>{
+        const check = ()=>{ try { reg.update(); } catch(e){} };
+        document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) check(); });
+        setInterval(check, 30*60*1000);
+      }).catch(()=>{});
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener("controllerchange", ()=>{ if (hadController && !refreshing){ refreshing = true; showUpdateBar(); } });
+    } catch(e){}
+  });
 }
 </script>
 </body>
