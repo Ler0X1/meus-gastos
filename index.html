@@ -496,7 +496,8 @@ function renderHome(){
   }
   const recents = suggestions("",8);
   const last = list.slice().sort(byDateDesc).slice(0,5);
-  $("#v-inicio").innerHTML = `
+  const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  $("#v-inicio").innerHTML = (deferredInstall && !standalone ? `<div class="card" style="display:flex;align-items:center;gap:12px;background:var(--accent-soft)"><div class="ico">📲</div><div style="flex:1;font-size:14px"><b>Instale o app no celular</b><br><span class="t2">Abre pelo ícone e funciona sem internet.</span></div><button class="btn pri" data-act="install" style="width:auto;height:42px;padding:0 16px;font-size:15px">Instalar</button></div>` : "") + `
     <div class="card hero">
       <div class="lbl">Gasto em ${monthLabel(ui.month)}</div>
       <div class="big">${money(tot)}</div>
@@ -634,7 +635,8 @@ function columnChart(el, data, opt){
 
 /* ---------- Ajustes ---------- */
 let deferredInstall = null;
-window.addEventListener("beforeinstallprompt", e=>{ e.preventDefault(); deferredInstall = e; if (ui.tab==="ajustes") renderSettings(); });
+window.addEventListener("beforeinstallprompt", e=>{ e.preventDefault(); deferredInstall = e; render(); });
+window.addEventListener("appinstalled", ()=>{ deferredInstall = null; render(); toast("App instalado! Procure o ícone Meus Gastos."); });
 function renderSettings(){
   const s = state.settings;
   const memN = Object.keys(state.memory).length;
@@ -666,7 +668,7 @@ function renderSettings(){
       `${deferredInstall?`<button class="btn pri" data-act="install" style="margin-bottom:12px">Instalar na tela inicial</button>`:""}
       <div class="t2" style="font-size:14px;line-height:1.5"><b>Android (Chrome):</b> menu ⋮ → <i>Instalar app</i> ou <i>Adicionar à tela inicial</i>.<br><b>iPhone (Safari):</b> botão Compartilhar → <i>Adicionar à Tela de Início</i>.</div>`}
     </div>
-    <div class="muted" style="text-align:center;font-size:12px;margin:8px 0 16px">Meus Gastos · funciona offline · v1.1</div>`;
+    <div class="muted" style="text-align:center;font-size:12px;margin:8px 0 16px">Meus Gastos · funciona offline · v1.2</div>`;
 }
 
 /* ================= Folha de lançamento ================= */
@@ -993,7 +995,7 @@ $("main").addEventListener("click", ev=>{
   else if (act==="backup") openBackup();
   else if (act==="restore") openRestore();
   else if (act==="csv") exportCSV();
-  else if (act==="install" && deferredInstall){ deferredInstall.prompt(); deferredInstall.userChoice.finally(()=>{ deferredInstall=null; renderSettings(); }); }
+  else if (act==="install" && deferredInstall){ deferredInstall.prompt(); deferredInstall.userChoice.finally(()=>{ deferredInstall=null; render(); }); }
   else if (act==="wipe") confirmBox("Apagar tudo?", `Isso remove os ${state.expenses.length} gastos, categorias personalizadas e a memória deste aparelho. Faça um backup antes, se quiser guardar.`, "Apagar tudo", ()=>{ state = freshState(); save(); applyTheme(); closeSheet(); render(); toast("Dados apagados"); });
 });
 
