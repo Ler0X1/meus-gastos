@@ -293,8 +293,9 @@ button.badge{font-size:12px;padding:6px 11px;border:1px solid transparent}
 "use strict";
 /* ================= Dados e armazenamento ================= */
 const KEY = "meusgastos.v1";
-const APP_VERSION = "2.0";
+const APP_VERSION = "2.1";
 const NOVIDADES = [
+  "💳 Compras parceladas: escolha “Parcelado” no pagamento e cada parcela entra como gasto fixo até a última",
   "🎨 A tela inicial muda de cor conforme o quanto ainda dá para gastar hoje",
   "📅 Valor por dia: (salário − fixos) ÷ dias do mês, e o que sobra num dia passa para o próximo",
   "🧮 Custo fixo por dia em Relatórios: quanto seu dia custa mesmo sem gastar nada",
@@ -477,13 +478,23 @@ function suggestions(text, limit){
 
 /* ================= Gastos fixos ================= */
 function dueDate(mk, day){ return mk+"-"+pad(Math.min(day, daysInMonth(mk))); }
+const monthsBetween = (a,b) => { const [ya,ma]=a.split("-").map(Number), [yb,mb]=b.split("-").map(Number); return (yb-ya)*12+(mb-ma); };
+const isActive = (f, mk) => mk >= f.start && (!f.parcels || monthsBetween(f.start, mk) < f.parcels);
+const activeFixed = mk => state.fixed.filter(f=>isActive(f,mk));
+const fixVal = (f, mk) => (f.parcels && f.v1 && monthsBetween(f.start,mk)===0) ? f.v1 : f.v;
+const fixedSum = mk => activeFixed(mk).reduce((a,f)=>a+fixVal(f,mk),0);
+const parcEnd = f => shiftMonth(f.start, f.parcels-1);
+const mShort = mk => { const [y,m]=mk.split("-").map(Number); return MSHORT[m-1]+"/"+String(y).slice(2); };
+const parcDesc = (f, mk) => `${f.d} (${monthsBetween(f.start,mk)+1}/${f.parcels})`;
 function ensureFixed(){
   const cur = monthKey(today()); let changed = false;
   state.fixed.forEach(f=>{
     let mk = f.start, guard = 0;
-    while (mk <= cur && guard++ < 240){
+    while (mk <= cur && isActive(f, mk) && guard++ < 240){
       if (!state.fixedSkip[f.id+"|"+mk] && !state.expenses.some(e=>e.fx===f.id && monthKey(e.dt)===mk)){
-        state.expenses.push({id:uid(), v:f.v, d:f.d, c:f.c, dt:dueDate(mk,f.day), m:f.m||"", ts:Date.now(), fx:f.id});
+        const inst = {id:uid(), v:fixVal(f,mk), d:f.parcels?parcDesc(f,mk):f.d, c:f.c, dt:dueDate(mk,f.day), m:f.m||"", ts:Date.now(), fx:f.id};
+        if (f.parcels) inst.pi = monthsBetween(f.start,mk)+1;
+        state.expenses.push(inst);
         changed = true;
       }
       mk = shiftMonth(mk,1);
@@ -561,7 +572,7 @@ function render(){
 }
 function itemHTML(e, showDate){
   const c = catById(e.c);
-  const sub = [e.fx && e.c!=="fixos"?"📌 Fixo":"", c.name, e.m?methodName(e.m):"", showDate?dayLabel(e.dt):""].filter(Boolean).join(" · ");
+  const sub = [e.pi?"💳 Parcela":(e.fx && e.c!=="fixos"?"📌 Fixo":""), c.name, e.m?methodName(e.m):"", showDate?dayLabel(e.dt):""].filter(Boolean).join(" · ");
   return `<button class="item" data-edit="${e.id}"><div class="ico">${c.emoji}</div><div class="mid"><div class="d">${esc(e.d)}</div><div class="s">${esc(sub)}</div></div><div style="text-align:right"><div class="v">${money(e.v)}</div>${fixBadge(e,false)}</div></button>`;
 }
 function catTotals(list){
@@ -638,7 +649,7 @@ function renderHome(){
     fixCard = `<div class="card" style="display:flex;align-items:center;gap:12px"><div class="ico">📌</div><div style="flex:1;font-size:14px"><b>Gastos fixos</b><br><span class="t2">Aluguel, internet, faculdade… cadastre uma vez e eles entram sozinhos todo mês.</span></div><button class="btn sec" data-act="fixed" style="width:auto;height:40px;padding:0 14px;font-size:14px">Cadastrar</button></div>`;
   } else if (fixList.length){
     const toPay = fixList.filter(e=>!isPaid(e)), soon = isCur ? toPay.filter(e=>daysTo(e.dt)<=3) : [];
-    fixCard = `<div class="card"><h3>Gastos fixos <button class="link" data-act="fixed">Gerenciar</button></h3>
+    fixCard = `<div class="card"><h3>${fixList.some(e=>e.pi)?"Fixos e parcelas":"Gastos fixos"} <button class="link" data-act="fixed">Gerenciar</button></h3>
       ${soon.length?`<div class="alertline">⏰ <b>${soon.length===1?"1 conta vence":soon.length+" contas vencem"} em breve:</b> ${soon.map(e=>esc(e.d)+" ("+(daysTo(e.dt)<0?"vencida":daysTo(e.dt)===0?"hoje":daysTo(e.dt)===1?"amanhã":"dia "+parseYmd(e.dt).getDate())+")").join(", ")}</div>`:""}
       <div class="sumline" style="margin:0 2px 4px"><span>A pagar <b>${money(sum(toPay))}</b></span><span>Pago <b>${money(sum(fixList)-sum(toPay))}</b></span></div>
       ${fixList.map(e=>`<div class="item" data-edit="${e.id}" style="cursor:pointer"><div class="ico">${catById(e.c).emoji}</div><div class="mid"><div class="d">${esc(e.d)}</div><div class="s">${money(e.v)} · dia ${parseYmd(e.dt).getDate()}</div></div>${fixBadge(e,true)}</div>`).join("")}
@@ -703,7 +714,7 @@ function renderList(){
 // base do dia = (salário − fixos) ÷ dias do mês; sobra/falta passa para o dia seguinte
 function dayBudget(){
   const sal = state.settings.salary||0; if (!sal) return null;
-  const mk = monthKey(today()), dim = daysInMonth(mk), free = sal - sum(state.fixed), tdy = today(), d = new Date().getDate();
+  const mk = monthKey(today()), dim = daysInMonth(mk), free = sal - fixedSum(mk), tdy = today(), d = new Date().getDate();
   const B = k => Math.round(free*k/dim);
   const varList = inMonth(mk).filter(e=>!e.fx);
   const before = sum(varList.filter(e=>e.dt < tdy)), spent = sum(varList.filter(e=>e.dt===tdy));
@@ -725,7 +736,7 @@ function renderReports(){
   const meth = {}; list.forEach(e=>{ const k=e.m||"—"; meth[k]=(meth[k]||0)+e.v; });
   const methRows = Object.entries(meth).sort((a,b)=>b[1]-a[1]);
   const mmax = methRows.length?methRows[0][1]:1;
-  const sal = state.settings.salary||0, fixTotAll = sum(state.fixed);
+  const sal = state.settings.salary||0, fixTotAll = fixedSum(mk);
   const perDay = Math.round((sal - fixTotAll)/dim);            // base livre por dia (dias do mês)
   const varList = list.filter(e=>!e.fx), tdy = today();
   const varOn = ds => sum(varList.filter(e=>e.dt===ds));
@@ -767,12 +778,12 @@ function renderReports(){
     pd = `<div class="card"><h3>Valor por dia <button class="link" data-act="salary">Editar salário</button></h3>${body}
       <div class="muted" style="font-size:12px;margin-top:10px">Conta só os gastos do dia a dia (os fixos já foram descontados). O que sobra num dia vai para o próximo; o que passa, sai do próximo. Recomeça todo mês.</div></div>`;
   }
-  const fixTot = sum(state.fixed), fixDay = Math.round(fixTot/dim);
+  const fixTot = fixedSum(mk), fixDay = Math.round(fixTot/dim);
   let fx;
-  if (!state.fixed.length){
+  if (!activeFixed(mk).length){
     fx = `<div class="card"><h3>Custo fixo por dia</h3><div class="t2" style="font-size:14px">Cadastre seus gastos fixos (aluguel, internet, faculdade…) e o app mostra quanto custa o seu dia mesmo sem gastar nada.</div><div class="btns"><button class="btn sec" data-act="fixed">Cadastrar gastos fixos</button></div></div>`;
   } else {
-    const fl = state.fixed.slice().sort((a,b)=>b.v-a.v);
+    const fl = activeFixed(mk).map(f=>({...f, v:fixVal(f,mk), d:f.parcels?parcDesc(f,mk):f.d})).sort((a,b)=>b.v-a.v);
     fx = `<div class="card"><h3>Custo fixo por dia <button class="link" data-act="fixed">Editar fixos</button></h3>
       <div class="hero"><div class="big" style="font-size:34px">${money(fixDay)}</div><div class="delta">por dia, mesmo sem gastar nada · ${money(fixTot)} de fixos ÷ ${dim} dias</div></div>
       ${sal?`<div class="alertline" style="margin-top:12px">Salário por dia ${money(Math.round(sal/dim))} − fixos ${money(fixDay)} = ${perDay>=0?`<b>${money(perDay)}/dia livres</b> para o dia a dia.`:`os fixos passam <b>${money(-perDay)}/dia</b> do seu salário.`}</div>`:""}
@@ -840,8 +851,8 @@ function renderSettings(){
     <div class="card">
       <button class="set" data-act="name"><div class="ico">👤</div><div class="mid"><div class="d">Seu nome</div><div class="s">${esc(s.name||"Não informado")}</div></div><div class="chev">›</div></button>
       <button class="set" data-act="budget"><div class="ico">🎯</div><div class="mid"><div class="d">Orçamento mensal</div><div class="s">${s.budget?money(s.budget):"Não definido"}</div></div><div class="chev">›</div></button>
-      <button class="set" data-act="salary"><div class="ico">💰</div><div class="mid"><div class="d">Salário (valor por dia)</div><div class="s">${s.salary?money(s.salary)+" → "+money(Math.round((s.salary-sum(state.fixed))/daysInMonth(monthKey(today()))))+"/dia livres":"Não informado"}</div></div><div class="chev">›</div></button>
-      <button class="set" data-act="fixed"><div class="ico">📌</div><div class="mid"><div class="d">Gastos fixos</div><div class="s">${state.fixed.length?state.fixed.length+" cadastrados · "+money(sum(state.fixed))+"/mês":"Entram sozinhos todo mês"}</div></div><div class="chev">›</div></button>
+      <button class="set" data-act="salary"><div class="ico">💰</div><div class="mid"><div class="d">Salário (valor por dia)</div><div class="s">${s.salary?money(s.salary)+" → "+money(Math.round((s.salary-fixedSum(monthKey(today())))/daysInMonth(monthKey(today()))))+"/dia livres":"Não informado"}</div></div><div class="chev">›</div></button>
+      <button class="set" data-act="fixed"><div class="ico">📌</div><div class="mid"><div class="d">Gastos fixos e parcelas</div><div class="s">${activeFixed(monthKey(today())).length?activeFixed(monthKey(today())).length+" ativos · "+money(fixedSum(monthKey(today())))+"/mês":"Entram sozinhos todo mês"}</div></div><div class="chev">›</div></button>
       <button class="set" data-act="cats"><div class="ico">🏷️</div><div class="mid"><div class="d">Categorias</div><div class="s">${state.cats.filter(c=>!c.hidden).length} ativas · editar, criar, ocultar</div></div><div class="chev">›</div></button>
       <button class="set" data-act="memory"><div class="ico">🧠</div><div class="mid"><div class="d">Memória do app</div><div class="s">${memN} descrições aprendidas</div></div><div class="chev">›</div></button>
       <button class="set" data-act="paste"><div class="ico">📋</div><div class="mid"><div class="d">Colar vários gastos</div><div class="s">Cole uma lista e importe de uma vez</div></div><div class="chev">›</div></button>
@@ -897,7 +908,7 @@ function centsToField(c){ return c ? (c/100).toLocaleString("pt-BR",{minimumFrac
 function openExpense(pre){
   pre = pre || {};
   const editing = !!pre.id;
-  let st = {v:pre.v||0, d:pre.d||"", c:pre.c||null, dt:pre.dt||today(), m: pre.m!==undefined ? pre.m : state.settings.lastMethod, catManual: !!pre.c, paid: pre.fx ? isPaid(pre) : undefined};
+  let st = {v:pre.v||0, d:pre.d||"", c:pre.c||null, dt:pre.dt||today(), m: pre.m!==undefined ? pre.m : state.settings.lastMethod, catManual: !!pre.c, paid: pre.fx ? isPaid(pre) : undefined, parc: 0, parcNext: false};
   if (!st.c && st.d) st.c = guessCat(st.d);
   const cats = state.cats.filter(c=>!c.hidden || c.id===st.c);
   openSheet(`
@@ -907,7 +918,14 @@ function openExpense(pre){
     <div class="field"><label>Categoria <span class="muted" id="fAuto" style="font-weight:500"></span></label><div class="cats" id="fCats">${cats.map(c=>`<button class="cat" data-c="${c.id}"><b>${c.emoji}</b><span>${esc(c.name)}</span></button>`).join("")}</div></div>
     <div class="field"><label>Data</label><div class="row" id="fDt"><button class="chip" data-dt="${today()}">Hoje</button><button class="chip" data-dt="${yesterday()}">Ontem</button><input type="date" id="fDate" value="${st.dt}" max="2100-12-31" aria-label="Escolher data"></div></div>
     ${pre.fx?`<div class="field"><label>Situação</label><div class="seg"><button data-pd="0">⏰ A pagar</button><button data-pd="1">✓ Pago</button></div><div class="muted" style="font-size:12px;margin:6px 2px 0">📌 Gasto fixo. Mudanças aqui valem só para este mês; para todos os meses use Gastos fixos.</div></div>`:""}
-    <div class="field"><label>Pagamento</label><div class="row" id="fM">${METHODS.map(([k,l])=>`<button class="chip" data-m="${k}">${l}</button>`).join("")}</div></div>
+    <div class="field"><label>Pagamento</label><div class="row" id="fM">${METHODS.map(([k,l])=>`<button class="chip" data-m="${k}">${l}</button>`).join("")}${editing?"":`<button class="chip" data-parc>💳 Parcelado</button>`}</div>
+      ${editing?"":`<div id="fParc" class="hidden" style="margin-top:10px;background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:12px">
+        <label style="margin-top:0">Em quantas parcelas?</label>
+        <div class="row">${[2,3,4,5,6,10,12].map(n=>`<button class="chip" data-pn="${n}">${n}×</button>`).join("")}<input type="number" id="fPn" inputmode="numeric" min="2" max="48" placeholder="outro" style="width:76px;height:38px;border-radius:999px;border:1px solid var(--border);background:var(--card);padding:0 12px;font-size:14px"></div>
+        <label style="margin-top:12px">Primeira parcela</label>
+        <div class="seg"><button data-pf="0">No mês da compra</button><button data-pf="1">No mês seguinte</button></div>
+        <div id="fPsum" style="margin-top:12px;font-size:14.5px"></div>
+      </div>`}</div>
     <div class="btns ${editing?"two":""}">
       ${editing?`<button class="btn dan" id="fDel">Excluir</button><button class="btn pri" id="fSave">Salvar</button>`:
       `<button class="btn pri" id="fSave">Salvar gasto</button><button class="btn sec" id="fSaveMore">Salvar e adicionar outro</button>`}
@@ -918,6 +936,19 @@ function openExpense(pre){
       body.querySelectorAll("[data-m]").forEach(b=>b.classList.toggle("on", b.dataset.m===st.m));
       body.querySelectorAll("[data-dt]").forEach(b=>b.classList.toggle("on", b.dataset.dt===st.dt));
       body.querySelectorAll("[data-pd]").forEach(b=>b.classList.toggle("on", (b.dataset.pd==="1")===st.paid));
+      const pb = body.querySelector("[data-parc]");
+      if (pb){
+        pb.classList.toggle("on", st.parc>0);
+        body.querySelector("#fParc").classList.toggle("hidden", !st.parc);
+        body.querySelectorAll("[data-pn]").forEach(b=>b.classList.toggle("on", +b.dataset.pn===st.parc));
+        body.querySelectorAll("[data-pf]").forEach(b=>b.classList.toggle("on", (b.dataset.pf==="1")===st.parcNext));
+        const ps = body.querySelector("#fPsum");
+        if (st.parc){
+          const each = Math.floor(st.v/st.parc), first = each + (st.v - each*st.parc);
+          const s0 = st.parcNext ? shiftMonth(monthKey(st.dt),1) : monthKey(st.dt), s1 = shiftMonth(s0, st.parc-1);
+          ps.innerHTML = st.v ? `<b>${st.parc}× de ${money(each)}</b>${first!==each?` <span class="muted">(1ª de ${money(first)})</span>`:""}<br><span class="t2">De ${mShort(s0)} até ${mShort(s1)} · total ${money(st.v)}</span><br><span class="muted" style="font-size:12.5px">Cada parcela entra como gasto fixo no dia ${parseYmd(st.dt).getDate()} de cada mês.</span>` : `<span class="muted">Digite o valor total da compra lá em cima.</span>`;
+        }
+      }
       body.querySelector("#fDate").value = st.dt;
       body.querySelector("#fAuto").textContent = (!st.catManual && st.c) ? "· sugerida automaticamente" : "";
     };
@@ -942,16 +973,33 @@ function openExpense(pre){
       const b = ev.target.closest("button,[data-s]"); if (!b) return;
       if (b.dataset.c){ st.c=b.dataset.c; st.catManual=true; paint(); }
       else if (b.dataset.m){ st.m = st.m===b.dataset.m ? "" : b.dataset.m; paint(); }
+      else if (b.hasAttribute("data-parc")){ st.parc = st.parc ? 0 : 2; if (st.parc && !st.m) st.m = "credito"; if (st.parc) st.m = "credito"; paint(); }
+      else if (b.dataset.pn){ st.parc = +b.dataset.pn; const pi = body.querySelector("#fPn"); if (pi) pi.value=""; paint(); }
+      else if (b.dataset.pf){ st.parcNext = b.dataset.pf==="1"; paint(); }
       else if (b.dataset.dt){ st.dt=b.dataset.dt; paint(); }
       else if (b.dataset.pd){ st.paid = b.dataset.pd==="1"; paint(); }
       else if (b.dataset.s){ const mm=state.memory[b.dataset.s]; if (mm){ st.d=mm.d; fD.value=mm.d; st.c=mm.c; st.catManual=true; if (!st.v){ st.v=mm.v; fV.value=centsToField(mm.v);} if (mm.m) st.m=mm.m; paint(); sugs(); } }
       else if (b.hasAttribute("data-close")) closeSheet();
     });
     body.querySelector("#fDate").addEventListener("change", ev=>{ if (ev.target.value){ st.dt=ev.target.value; paint(); } });
+    const fPn = body.querySelector("#fPn");
+    if (fPn) fPn.addEventListener("input", ()=>{ const n = parseInt(fPn.value,10); if (n>=2 && n<=48){ st.parc = n; paint(); } });
+    fV.addEventListener("input", ()=>{ if (st.parc) paint(); });
     const doSave = (more)=>{
       if (!st.v){ fV.focus(); shake(fV); toast("Informe o valor do gasto"); return; }
       st.d = fD.value.trim();
       if (!st.c) st.c = guessCat(st.d) || "outros";
+      if (!editing && st.parc >= 2){
+        if (!st.d){ fD.focus(); shake(fD); toast("Dê um nome à compra parcelada"); return; }
+        const n = st.parc, each = Math.floor(st.v/n), first = each + (st.v - each*n);
+        const start = st.parcNext ? shiftMonth(monthKey(st.dt),1) : monthKey(st.dt);
+        const f = {id:"p"+uid(), d:st.d, v:each, v1:first, c:st.c, day:parseYmd(st.dt).getDate(), m:st.m||"credito", start, parcels:n, total:st.v, bought:st.dt};
+        state.fixed.push(f); learn({d:st.d, c:st.c, v:st.v, m:f.m}); save(); ensureFixed();
+        if (start <= monthKey(today())) ui.month = start;
+        closeSheet(); render();
+        toast(`💳 ${esc(st.d)}: ${n}× de ${money(each)} · até ${mShort(parcEnd(f))}`);
+        return;
+      }
       if (editing){
         updateExpense(pre.id, Object.assign({v:st.v, d:st.d||catById(st.c).name, c:st.c, dt:st.dt, m:st.m}, pre.fx?{paid:st.paid}:{}));
         closeSheet(); render(); toast("Gasto atualizado");
@@ -1023,11 +1071,19 @@ function openBudget(){
 
 /* ---------- Gastos fixos (cadastro) ---------- */
 function openFixed(){
-  const list = state.fixed.slice().sort((a,b)=>a.day-b.day);
+  const cur = monthKey(today());
+  const list = state.fixed.filter(f=>!f.parcels).sort((a,b)=>a.day-b.day);
+  const parcs = state.fixed.filter(f=>f.parcels).sort((a,b)=>parcEnd(a).localeCompare(parcEnd(b)));
+  const pAct = parcs.filter(f=>parcEnd(f) >= cur), pDone = parcs.filter(f=>parcEnd(f) < cur);
+  const pRow = f => { const done = parcEnd(f) < cur, notYet = f.start > cur; const k = monthsBetween(f.start, cur)+1;
+    return `<button class="set" data-fx="${f.id}" style="${done?"opacity:.5":""}"><div class="ico">💳</div><div class="mid"><div class="d">${esc(f.d)}</div><div class="s">${done?"Quitado ✓":notYet?"Começa em "+mShort(f.start):"Parcela "+k+" de "+f.parcels} · até ${mShort(parcEnd(f))} · total ${money(f.total||f.v*f.parcels)}</div></div><div class="v" style="font-weight:650">${f.parcels}× ${money(f.v)}</div></button>`; };
   openSheet(`<div class="sh-title"><h2>Gastos fixos</h2><button class="x-btn" data-close>✕</button></div>
     <div class="t2" style="font-size:13.5px;margin-bottom:6px">Entram sozinhos nas despesas todo mês. Ficam <b style="color:var(--accent)">azuis (a pagar)</b> até o dia do vencimento e <b style="color:var(--good-ink)">verdes (pago)</b> a partir dele. Pagou antes? Toque no selo na tela inicial.</div>
     ${list.length?`<div class="sumline" style="margin:4px 2px 2px"><span>${list.length} fixos</span><span>Total por mês <b>${money(sum(list))}</b></span></div>`+list.map(f=>`<button class="set" data-fx="${f.id}"><div class="ico">${catById(f.c).emoji}</div><div class="mid"><div class="d">${esc(f.d)}</div><div class="s">Todo dia ${f.day} · ${esc(catById(f.c).name)}${f.m?" · "+methodName(f.m):""}</div></div><div class="v" style="font-weight:650">${money(f.v)}</div></button>`).join(""):`<div class="empty"><div class="e">📌</div>Nenhum gasto fixo ainda.</div>`}
-    <div class="btns"><button class="btn pri" data-fx="__new">+ Novo gasto fixo</button></div>`, body=>{
+    <div class="btns"><button class="btn pri" data-fx="__new">+ Novo gasto fixo</button></div>
+    <h3 style="margin:22px 0 4px;font-size:16px">💳 Parcelamentos</h3>
+    ${pAct.length?pAct.map(pRow).join(""):`<div class="t2" style="font-size:13.5px">Nenhum parcelamento ativo. Para parcelar, toque no <b>+</b>, digite o valor total e escolha <b>💳 Parcelado</b> em Pagamento.</div>`}
+    ${pDone.length?`<div class="muted" style="font-size:12.5px;margin:12px 2px 0">Quitados</div>${pDone.map(pRow).join("")}`:""}`, body=>{
     body.onclick = ev=>{
       if (ev.target.closest("[data-close]")) return closeSheet();
       const b = ev.target.closest("[data-fx]"); if (!b) return;
@@ -1039,7 +1095,9 @@ function editFixed(f){
   const isNew = !f;
   let st = {v: f?f.v:0, d: f?f.d:"", c: f?f.c:"fixos", day: f?f.day:new Date().getDate(), m: f?(f.m||""):state.settings.lastMethod};
   const cats = state.cats.filter(c=>!c.hidden || c.id===st.c);
-  openSheet(`<div class="sh-title"><h2>${isNew?"Novo gasto fixo":"Editar gasto fixo"}</h2><button class="x-btn" data-back>‹</button></div>
+  const isP = !!(f && f.parcels);
+  openSheet(`<div class="sh-title"><h2>${isNew?"Novo gasto fixo":isP?"Editar parcelamento":"Editar gasto fixo"}</h2><button class="x-btn" data-back>‹</button></div>
+    ${isP?`<div class="alertline">💳 ${f.parcels}× de ${money(f.v)} · total ${money(f.total||f.v*f.parcels)} · de ${mShort(f.start)} até ${mShort(parcEnd(f))}<br><span class="t2" style="font-size:12.5px">Abaixo, o valor é o de cada parcela. Mudanças valem para a parcela deste mês e as próximas.</span></div>`:""}
     <div class="money"><span>R$</span><input id="xV" inputmode="numeric" placeholder="0,00" value="${centsToField(st.v)}" aria-label="Valor"></div>
     <div class="field"><label for="xD">Descrição</label><input class="inp" id="xD" value="${esc(st.d)}" placeholder="Ex.: Aluguel, Internet, Faculdade" autocomplete="off"></div>
     <div class="field"><label for="xDay">Dia do vencimento</label><input class="inp" id="xDay" type="number" inputmode="numeric" min="1" max="31" value="${st.day}" style="max-width:120px"><div class="muted" style="font-size:12px;margin:6px 2px 0">Em meses mais curtos, vence no último dia do mês.</div></div>
@@ -1067,12 +1125,13 @@ function editFixed(f){
         state.fixed.push({id:"f"+uid(), v:st.v, d:st.d, c:st.c, day:st.day, m:st.m, start:cur});
       } else {
         Object.assign(f, {v:st.v, d:st.d, c:st.c, day:st.day, m:st.m});
-        state.expenses.forEach(e=>{ if (e.fx===f.id && monthKey(e.dt)>=cur){ Object.assign(e,{v:st.v, d:st.d, c:st.c, m:st.m, dt:dueDate(monthKey(e.dt), st.day)}); } });
+        if (f.parcels){ if (f.v1 && monthsBetween(f.start,cur)>0) delete f.v1; f.total = (f.v1||f.v) + f.v*(f.parcels-1); }
+        state.expenses.forEach(e=>{ if (e.fx===f.id && monthKey(e.dt)>=cur){ Object.assign(e,{v:fixVal(f,monthKey(e.dt)), d:f.parcels?parcDesc(f,monthKey(e.dt)):st.d, c:st.c, m:st.m, dt:dueDate(monthKey(e.dt), st.day)}); } });
       }
       save(); ensureFixed(); render(); openFixed(); toast(isNew?"Gasto fixo cadastrado e incluído neste mês":"Gasto fixo atualizado");
     };
     const del = body.querySelector("#xDel");
-    if (del) del.onclick = ()=> confirmBox("Excluir gasto fixo?", `“${f.d}” deixa de entrar nos próximos meses e sai deste mês. Os meses anteriores continuam no histórico.`, "Excluir", ()=>{
+    if (del) del.onclick = ()=> confirmBox(isP?"Excluir parcelamento?":"Excluir gasto fixo?", isP?`As parcelas de “${f.d}” deste mês em diante deixam de aparecer. As parcelas de meses anteriores continuam no histórico.`:`“${f.d}” deixa de entrar nos próximos meses e sai deste mês. Os meses anteriores continuam no histórico.`, "Excluir", ()=>{
       const cur = monthKey(today());
       state.fixed = state.fixed.filter(x=>x.id!==f.id);
       state.expenses = state.expenses.filter(e=>!(e.fx===f.id && monthKey(e.dt)>=cur));
@@ -1156,7 +1215,7 @@ function showUpdateBar(){
 /* ---------- Salário ---------- */
 function openSalary(){
   let v = state.settings.salary||0;
-  const dimNow = daysInMonth(monthKey(today())), fixNow = sum(state.fixed);
+  const dimNow = daysInMonth(monthKey(today())), fixNow = fixedSum(monthKey(today()));
   const prev = ()=> v ? `Livre por dia este mês: <b>${money(Math.round((v-fixNow)/dimNow))}</b>${fixNow?`<br><span class="muted" style="font-size:13px">(salário − ${money(fixNow)} de fixos) ÷ ${dimNow} dias</span>`:""}` : "Digite o valor que você recebe por mês.";
   openSheet(`<div class="sh-title"><h2>Salário mensal</h2><button class="x-btn" data-close>✕</button></div>
     <div class="t2" style="font-size:14px">O app desconta os gastos fixos e divide pelos dias do mês para calcular quanto você pode gastar por dia. Atualize sempre que seu salário mudar.</div>
